@@ -25,7 +25,8 @@ public class SecurityConfiguration {
              //   .requestMatchers("/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/auth/list/**").hasAnyRole(User.Role.ADMINISTRATOR.name(),
                         User.Role.SUPPORT.name())               // other matchers
-                .requestMatchers(HttpMethod.POST, "/api/antifraud/transaction/**").hasRole(User.Role.MERCHANT.name())
+                .requestMatchers(HttpMethod.POST, "/api/antifraud/transaction").hasRole(User.Role.MERCHANT.name())
+                .requestMatchers(HttpMethod.PUT, "/api/antifraud/transaction").hasRole(User.Role.SUPPORT.name())
                 .requestMatchers(HttpMethod.PUT, "/api/auth/access/**").hasRole(User.Role.ADMINISTRATOR.name())
                 .requestMatchers(HttpMethod.PUT, "/api/auth/role").hasRole(User.Role.ADMINISTRATOR.name())
                 .requestMatchers(HttpMethod.DELETE, "/api/auth/user/*").hasRole(User.Role.ADMINISTRATOR.name())
@@ -35,6 +36,7 @@ public class SecurityConfiguration {
                 .requestMatchers(HttpMethod.POST, "/api/antifraud/stolencard").hasRole(User.Role.SUPPORT.name())
                 .requestMatchers(HttpMethod.GET, "/api/antifraud/stolencard").hasRole(User.Role.SUPPORT.name())
                 .requestMatchers(HttpMethod.DELETE, "/api/antifraud/stolencard/*").hasRole(User.Role.SUPPORT.name())
+                .requestMatchers(HttpMethod.GET, "/api/antifraud/history/**").hasRole(User.Role.SUPPORT.name())
                 .and()
                 .sessionManagement()
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS); // no session

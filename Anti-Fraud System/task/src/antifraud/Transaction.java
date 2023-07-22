@@ -1,15 +1,20 @@
 package antifraud;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
+import java.text.SimpleDateFormat;
 import java.util.Date;
 
 @Entity
 @Table(name = "transactions")
 public class Transaction {
 
+    public static final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
+    @JsonProperty("transactionId")
     private Long id;
     private Long amount;
     private String ip;
@@ -17,7 +22,9 @@ public class Transaction {
     private String region;
     private Date date;
     private String result;
+    @JsonIgnore
     private String info;
+    private String feedback;
 
     public Long getId() {
         return id;
@@ -83,6 +90,18 @@ public class Transaction {
         this.info = info;
     }
 
+    public String getFeedback() {
+        return feedback;
+    }
+
+    public void setFeedback(String feedback) {
+        this.feedback = feedback;
+    }
+
+    @JsonProperty("date")
+    public String getReadableData() {
+        return dateFormat.format(date);
+    }
     @Override
     public String toString() {
         return "Transaction{" +

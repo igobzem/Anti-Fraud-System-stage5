@@ -1,5 +1,7 @@
 package antifraud;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +12,8 @@ import java.util.*;
 
 @RestController
 public class Controller {
+    Logger logger = LoggerFactory.getLogger(Controller.class);
+
     @Autowired
     private UserRepository userRepo;
     @Autowired
@@ -20,6 +24,11 @@ public class Controller {
     @PostMapping("/api/antifraud/transaction")
     public ResponseEntity makePurchase(@RequestBody Map<String, String> map) {
         return transactionService.makePurchase(map);
+    }
+
+    @PutMapping("/api/antifraud/transaction")
+    public ResponseEntity addFeedback(@RequestBody Map<String, String> map) {
+        return transactionService.addFeedback(map);
     }
 
     @PostMapping("/api/antifraud/suspicious-ip")
@@ -52,6 +61,15 @@ public class Controller {
         return transactionService.deleteStolenCard(number);
     }
 
+    @GetMapping("/api/antifraud/history/{number}")
+    public ResponseEntity history(@PathVariable String number) {
+        return transactionService.history(number);
+    }
+
+    @GetMapping("/api/antifraud/history")
+    public ResponseEntity history() {
+        return transactionService.historyAll();
+    }
 
     @PostMapping("/api/auth/user")
     public ResponseEntity auth(@RequestBody User user) {
@@ -94,6 +112,7 @@ public class Controller {
         }
         return new ResponseEntity(result, HttpStatus.OK);
     }
+
     @DeleteMapping("/api/auth/user/{username}")
     public ResponseEntity deleteUser(@PathVariable String username) {
         Optional<User> optional = userRepo.findByUsernameIgnoreCase(username);
@@ -113,10 +132,12 @@ public class Controller {
          if (optional.isEmpty()) {
              return new ResponseEntity(HttpStatus.NOT_FOUND);
          }
-         if (!User.Role.SUPPORT.name().equals(user.getRole()) && !User.Role.MERCHANT.equals(user.getRole())) {
+         if (!User.Role.SUPPORT.name().equals(user.getRole())
+                 && !User.Role.MERCHANT.name().equals(user.getRole())) {
+             logger.info(user.getRole());
              return new ResponseEntity(HttpStatus.BAD_REQUEST);
          }
-        if (user.getRole().equals(optional.get().getRole()))  {
+        if (user.getRole().toUpperCase().equals(optional.get().getRole()))  {
             return new ResponseEntity(HttpStatus.CONFLICT);
         }
         User entity = optional.get();

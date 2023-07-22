@@ -9,9 +9,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Pattern;
+
+import static java.lang.Math.ceil;
 
 @Service
 public class TransactionService {
@@ -19,8 +20,11 @@ public class TransactionService {
     private final String regex = "^((25[0-5]|(2[0-4]|1\\d|[1-9]|)\\d)\\.?\\b){4}$";
     private final Pattern pattern = Pattern.compile(regex);
 
-    private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+    private static final long LIMIT_ALLOWED = 200;
+    private static final long LIMIT_MANUAL = 1500;
+
     private final String NONE = "none";
+
     enum Result {ALLOWED, MANUAL_PROCESSING, PROHIBITED};
 
     @Autowired
@@ -31,8 +35,10 @@ public class TransactionService {
     @Autowired
     private TransactionRepository transactionRepo;
 
+    @Autowired
+    private LimitRepository limitRepo;
+
     public ResponseEntity makePurchase(Map<String, String> map) {
-        System.out.println();
         Map<String, Object> result = new HashMap<>();
         Transaction transaction = new Transaction();
         if (!validateData(transaction, map)) {
@@ -44,6 +50,7 @@ public class TransactionService {
         resultValue = checkCard(transaction, resultValue);
         resultValue = checkIp(transaction, resultValue);
         resultValue = checkTransaction(transaction, resultValue);
+        transaction.setFeedback("");
         transaction.setResult(resultValue.name());
         result.put("result", transaction.getResult());
         result.put("info", transaction.getInfo());
@@ -51,6 +58,75 @@ public class TransactionService {
         return new ResponseEntity(result, HttpStatus.OK);
     }
 
+    public ResponseEntity addFeedback(Map<String, String> map) {
+        String str = map.get("transactionId");
+        String feedback = map.get("feedback");
+        long id = Long.parseLong(str);
+        if (!Result.PROHIBITED.name().equals(feedback) && !Result.MANUAL_PROCESSING.name().equals(feedback)
+                && !Result.ALLOWED.name().equals(feedback)) {
+            return new ResponseEntity(HttpStatus.BAD_REQUEST);
+        }
+        Optional<Transaction> optional = transactionRepo.findById(id);
+        if (optional.isEmpty()) {
+            return new ResponseEntity(HttpStatus.NOT_FOUND);
+        }
+        Transaction transaction = optional.get();
+        if (!transaction.getFeedback().isEmpty() ) {
+            return new ResponseEntity(HttpStatus.CONFLICT);
+        }
+        if (feedback.equals(transaction.getResult())) {
+            return new ResponseEntity(HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+        String result = transaction.getResult();
+                if (feedback.equals(Result.ALLOWED.name())) {
+            if (result.equals(Result.MANUAL_PROCESSING.name())) {
+                changeLimits(transaction.getNumber(), transaction.getAmount(), 0);
+            } else {
+                changeLimits(transaction.getNumber(), transaction.getAmount(), transaction.getAmount());
+            }
+        } else if (feedback.equals(Result.MANUAL_PROCESSING.name())) {
+            if (result.equals(Result.ALLOWED.name())) {
+                changeLimits(transaction.getNumber(), -transaction.getAmount(), 0);
+            } else {
+                changeLimits(transaction.getNumber(), 0, transaction.getAmount());
+            }
+        } else {
+            if (result.equals(Result.ALLOWED.name())) {
+                changeLimits(transaction.getNumber(), -transaction.getAmount(), -transaction.getAmount());
+            } else {
+                changeLimits(transaction.getNumber(), 0, -transaction.getAmount());
+            }
+        }
+        transaction.setFeedback(feedback);
+        transactionRepo.save(transaction);
+        return new ResponseEntity(transaction, HttpStatus.OK);
+    }
+
+
+    private void changeLimits(String number, long allowed, long manual) {
+        Optional<Limit> optional = limitRepo.findByNumber(number);
+        Limit limit;
+        if (optional.isPresent()) {
+            limit = optional.get();
+        } else {
+            limit = new Limit();
+            limit.setLimitAllowed(LIMIT_ALLOWED);
+            limit.setLimitManual(LIMIT_MANUAL);
+        }
+        logger.info("before______________"+limit.getLimitAllowed());
+        logger.info("allowed______________"+allowed);
+        if (allowed != 0) {
+            long value = (long) ceil(0.8 * limit.getLimitAllowed() + 0.2 * allowed);
+            limit.setLimitAllowed(value);
+            logger.info("before______________"+limit.getLimitAllowed());
+        }
+        if (manual != 0) {
+            long value = (long) ceil(0.8 * limit.getLimitManual() + 0.2 * manual);
+            limit.setLimitManual(value);
+        }
+        limit.setNumber(number);
+        limitRepo.save(limit);
+    }
     private Result checkTransaction(Transaction transaction, Result result) {
         long cnt = transactionRepo.countRegions(lastHour(transaction.getDate()), transaction.getNumber(),
                 transaction.getRegion());
@@ -120,7 +196,7 @@ public class TransactionService {
             return false;
         }
         try {
-            Date date = dateFormat.parse(dateStr);
+            Date date = Transaction.dateFormat.parse(dateStr);
             transaction.setDate(date);
         } catch (ParseException e) {
             return false;
@@ -161,11 +237,22 @@ public class TransactionService {
         }
     }
     private Result checkAmount(Transaction transaction) {
-        if (transaction.getAmount() <= 200) {
+        Optional<Limit> optional = limitRepo.findByNumber(transaction.getNumber());
+        long limitAllowed = LIMIT_ALLOWED;
+        long limitManual = LIMIT_MANUAL;
+        Limit limit;
+        if (optional.isPresent()) {
+            limit = optional.get();
+            limitAllowed = limit.getLimitAllowed();
+            limitManual = limit.getLimitManual();
+        }
+        logger.info("---------"+limitAllowed);
+        logger.info("---------"+transaction.getAmount());
+        if (transaction.getAmount() <= limitAllowed) {
             return Result.ALLOWED;
         }
         transaction.setInfo("amount");
-        if (transaction.getAmount() <= 1500) {
+        if (transaction.getAmount() <= limitManual) {
             return Result.MANUAL_PROCESSING;
         }
         return Result.PROHIBITED;
@@ -178,7 +265,6 @@ public class TransactionService {
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(date);
         calendar.add(Calendar.HOUR_OF_DAY, hours);
-        logger.info("========="+calendar.getTime());
         return calendar.getTime();
     }
 
@@ -261,5 +347,19 @@ public class TransactionService {
             return new ResponseEntity(map, HttpStatus.OK);
         }
         return new ResponseEntity(HttpStatus.BAD_REQUEST);
+    }
+    public ResponseEntity history(String number) {
+        if (number != null && LuhnCheckDigit.LUHN_CHECK_DIGIT.isValid(number)) {
+            List<Transaction> transactions = transactionRepo.findByNumber(number);
+            if (transactions.isEmpty()) {
+                return new ResponseEntity(HttpStatus.NOT_FOUND);
+            }
+            return new ResponseEntity(transactions, HttpStatus.OK);
+        }
+        return new ResponseEntity(HttpStatus.BAD_REQUEST);
+    }
+    public ResponseEntity historyAll() {
+        List<Transaction> transactions = transactionRepo.findAll();
+        return new ResponseEntity(transactions, HttpStatus.OK);
     }
 }
